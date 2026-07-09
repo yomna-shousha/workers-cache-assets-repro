@@ -1,0 +1,20 @@
+name = "workers-cache-assets-repro-no-assets"
+main = "src/index.js"
+compatibility_date = "2026-07-08"
+workers_dev = true
+
+[cache]
+enabled = true
+cross_version_cache = false
+
+[exports.default]
+type = "worker"
+
+  [exports.default.cache]
+  enabled = false
+
+[exports.Cached]
+type = "worker"
+
+  [exports.Cached.cache]
+  enabled = true
