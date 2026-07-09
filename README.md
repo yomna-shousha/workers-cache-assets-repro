@@ -2,18 +2,26 @@
 
 This repository contains a minimal reproduction for a Workers Cache behavior difference when a Worker also has Static Assets configured.
 
-There are two Workers with identical runtime code and Workers Cache settings:
+There are four Workers that test two Workers Cache shapes:
 
-- `no-assets`: no Static Assets config.
-- `with-assets`: includes an `ASSETS` binding with `[assets] directory = "./public"`.
+- `default-no-assets`: default export is cached directly, no Static Assets config.
+- `default-with-assets`: default export is cached directly, includes an `ASSETS` binding.
+- `no-assets`: uncached default export calls a cache-enabled named `WorkerEntrypoint`, no Static Assets config.
+- `with-assets`: uncached default export calls a cache-enabled named `WorkerEntrypoint`, includes an `ASSETS` binding.
 
-Both Workers:
+The named-entrypoint Workers:
 
 - Enable top-level Workers Cache.
 - Disable caching for the default export.
 - Enable caching for a named `WorkerEntrypoint` called `Cached`.
 - Have the default export call `ctx.exports.Cached.fetch(request, { cf: { cacheKey } })`.
 - Return `200` HTML from `Cached.fetch()` with `Cache-Control: public, max-age=300`.
+- Include `X-Repro-Backend-Count` and `X-Repro-Generated-At` headers so cache hits are visible.
+
+The default-export Workers:
+
+- Enable top-level Workers Cache.
+- Return `200` HTML directly from the default export with `Cache-Control: public, max-age=300`.
 - Include `X-Repro-Backend-Count` and `X-Repro-Generated-At` headers so cache hits are visible.
 
 The only meaningful difference is this block in `with-assets/wrangler.toml`:
@@ -26,7 +34,7 @@ binding = "ASSETS"
 
 ## Expected Behavior
 
-For both Workers, repeated requests to the same URL should use Workers Cache for the named entrypoint response:
+For all four Workers, repeated requests to the same URL should use Workers Cache for the dynamic HTML response:
 
 ```text
 Cf-Cache-Status: MISS
@@ -40,13 +48,44 @@ On cache hits, `X-Repro-Backend-Count` and `X-Repro-Generated-At` should remain 
 
 Observed on 2026-07-08 with Wrangler 4.107.0 and compatibility date `2026-07-08`.
 
-`no-assets` behaves as expected:
+Summary:
+
+| Case | Static Assets configured? | Cached entrypoint | Result |
+| --- | --- | --- | --- |
+| `default-no-assets` | No | default export | Works: `MISS` then `HIT` |
+| `default-with-assets` | Yes | default export | Works: `MISS` then `HIT` |
+| `no-assets` | No | named `Cached` via `ctx.exports` | Works: `MISS` then `HIT` |
+| `with-assets` | Yes | named `Cached` via `ctx.exports` | Fails: no `Cf-Cache-Status`, rerenders every request |
+
+So the reproduced issue is not "all Workers Cache breaks when Static Assets are configured." The default export cache path still works with Static Assets configured. The failing shape is specifically the named-entrypoint cache path through `ctx.exports` when the same Worker also has Static Assets configured.
+
+### Passing Controls
+
+`default-no-assets` behaves as expected:
 
 ```text
 probe 1: Cf-Cache-Status: MISS, X-Repro-Backend-Count: 1
 probe 2: Cf-Cache-Status: HIT,  X-Repro-Backend-Count: 1
 probe 3: Cf-Cache-Status: HIT,  X-Repro-Backend-Count: 1
 ```
+
+`default-with-assets` also behaves as expected:
+
+```text
+probe 1: Cf-Cache-Status: MISS, X-Repro-Backend-Count: 1
+probe 2: Cf-Cache-Status: HIT,  X-Repro-Backend-Count: 1
+probe 3: Cf-Cache-Status: HIT,  X-Repro-Backend-Count: 1
+```
+
+`no-assets` named-entrypoint caching behaves as expected:
+
+```text
+probe 1: Cf-Cache-Status: MISS, X-Repro-Backend-Count: 1
+probe 2: Cf-Cache-Status: HIT,  X-Repro-Backend-Count: 1
+probe 3: Cf-Cache-Status: HIT,  X-Repro-Backend-Count: 1
+```
+
+### Failing Case
 
 `with-assets` does not show Workers Cache behavior for the same dynamic named-entrypoint response:
 
@@ -69,6 +108,10 @@ cd no-assets
 npm install
 cd ../with-assets
 npm install
+cd ../default-no-assets
+npm install
+cd ../default-with-assets
+npm install
 ```
 
 Deploy both Workers:
@@ -79,6 +122,12 @@ npx wrangler deploy
 
 cd ../with-assets
 npx wrangler deploy
+
+cd ../default-no-assets
+npx wrangler deploy
+
+cd ../default-with-assets
+npx wrangler deploy
 ```
 
 Probe each deployment repeatedly:
@@ -86,6 +135,16 @@ Probe each deployment repeatedly:
 ```bash
 NO_ASSETS_URL="https://<your-no-assets-worker>.<your-subdomain>.workers.dev/repro-html"
 WITH_ASSETS_URL="https://<your-with-assets-worker>.<your-subdomain>.workers.dev/repro-html"
+DEFAULT_NO_ASSETS_URL="https://<your-default-no-assets-worker>.<your-subdomain>.workers.dev/repro-html"
+DEFAULT_WITH_ASSETS_URL="https://<your-default-with-assets-worker>.<your-subdomain>.workers.dev/repro-html"
+
+for i in 1 2 3; do
+  curl -sS -D - -o /dev/null "$DEFAULT_NO_ASSETS_URL"
+done
+
+for i in 1 2 3; do
+  curl -sS -D - -o /dev/null "$DEFAULT_WITH_ASSETS_URL"
+done
 
 for i in 1 2 3; do
   curl -sS -D - -o /dev/null "$NO_ASSETS_URL"
@@ -109,6 +168,15 @@ X-Repro-Generated-At
 ## Files
 
 ```text
+default-no-assets/
+  wrangler.toml
+  src/index.js
+
+default-with-assets/
+  wrangler.toml
+  src/index.js
+  public/asset-control.txt
+
 no-assets/
   wrangler.toml
   src/index.js

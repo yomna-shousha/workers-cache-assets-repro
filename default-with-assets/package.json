@@ -1,0 +1,12 @@
+{
+  "name": "workers-cache-assets-repro-default-with-assets",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "4.107.0"
+  }
+}

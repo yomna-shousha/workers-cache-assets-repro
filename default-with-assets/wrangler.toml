@@ -1,0 +1,12 @@
+name = "workers-cache-assets-repro-default-with-assets"
+main = "src/index.js"
+compatibility_date = "2026-07-08"
+workers_dev = true
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[cache]
+enabled = true
+cross_version_cache = false
